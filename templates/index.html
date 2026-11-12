@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ASCII Studio: turn pictures into colored text</title>
+  <meta name="description" content="Convert PNG, JPG and WEBP images into detailed, colorful ASCII art. Download as text or PNG.">
+
+  <meta name="theme-color" content="#0e1016">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1016'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' font-family='monospace' fill='%23ff9bd8'%3E%40%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <!-- Tailwind is compiled ahead of time (see README steps) so phones don't download a compiler -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body class="min-h-screen">
+  <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:py-12">
+
+    <header class="mb-8 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">ASCII Studio</h1>
+        <p class="mt-2 max-w-lg" style="color:var(--muted)">
+          Turn a picture into text. Keep the original colors or tint it with any of the 256 terminal colors.
+        </p>
+      </div>
+    </header>
+
+    <!-- DOM order = phone order: upload, result, settings. On desktop the grid places
+         settings under upload in the left column and the result on the right. -->
+    <div class="grid gap-6 lg:grid-cols-[21rem_minmax(0,1fr)] lg:items-start lg:gap-x-8">
+
+      <!-- ================= UPLOAD (first on phones) ================= -->
+      <section aria-label="Upload" class="rounded-2xl p-4 lg:col-start-1 lg:row-start-1" style="background:var(--panel);border:1px solid var(--line)">
+          <label id="dropzone" class="dropzone" for="file-input">
+            <span id="drop-title" class="label">Drop an image here, or click to choose</span>
+            <span id="drop-sub" class="hint mt-1">PNG, JPG or WEBP. Large photos are shrunk automatically.</span>
+            <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp" class="sr-only">
+          </label>
+      </section>
+
+
+      <!-- ================= OUTPUT ================= -->
+      <section aria-label="Result" class="min-w-0 lg:col-start-2 lg:row-start-1 lg:row-span-2">
+        <div class="mb-3 flex flex-wrap items-center gap-3">
+          <button id="png-btn" type="button" class="btn btn-primary" disabled>Download .png</button>
+          <button id="txt-btn" type="button" class="btn" disabled>Download .txt</button>
+          <button id="copy-btn" type="button" class="btn" disabled>Copy text</button>
+          <span id="status" role="status" aria-live="polite"></span>
+        </div>
+
+        <!-- The art is drawn on a canvas so each character can have its own color -->
+        <div id="stage" class="stage">
+          <canvas id="art-canvas" role="img" aria-label="Animated sample of ASCII art"></canvas>
+        </div>
+        <p id="demo-note" class="hint mt-3">This is a live sample. Upload an image to replace it. Try the colors and background first.</p>
+      </section>
+
+      <!-- ================= CONTROLS ================= -->
+      <section aria-label="Settings" class="order-last rounded-2xl p-5 lg:order-none lg:col-start-1 lg:row-start-2" style="background:var(--panel);border:1px solid var(--line)">
+
+        <div class="group space-y-5">
+          <div>
+            <div class="flex items-baseline justify-between">
+              <label for="width" class="label">Detail</label>
+              <output id="width-value" for="width" class="hint">{{ default_width }} characters</output>
+            </div>
+            <input id="width" type="range" min="{{ min_width }}" max="{{ max_width }}" step="1" value="{{ default_width }}" class="mt-3">
+            <div class="hint flex justify-between text-xs"><span>{{ min_width }}</span><span>{{ max_width }}</span></div>
+          </div>
+
+          <div>
+            <span class="label block mb-2" id="charset-label">Characters</span>
+            <div id="charset" class="segmented" role="group" aria-labelledby="charset-label">
+              <button type="button" data-value="detailed" aria-pressed="true">Detailed (70)</button>
+              <button type="button" data-value="minimal" aria-pressed="false">Minimal (10)</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group space-y-4">
+          <div>
+            <span class="label block mb-2" id="color-label">Color</span>
+            <div id="color-mode" class="segmented" role="group" aria-labelledby="color-label">
+              <button type="button" data-value="original" aria-pressed="true">Original colors</button>
+              <button type="button" data-value="single" aria-pressed="false">One color</button>
+            </div>
+          </div>
+
+          <!-- shown in "Original colors" mode -->
+          <div id="boost-row">
+            <div class="flex items-baseline justify-between">
+              <label for="boost" class="label">Color boost</label>
+              <output id="boost-value" for="boost" class="hint">40%</output>
+            </div>
+            <input id="boost" type="range" min="0" max="100" value="40" class="mt-3">
+            <p class="hint mt-1">Makes dim colors stand out against the background.</p>
+          </div>
+
+          <!-- shown in "One color" mode -->
+          <div id="palette-row" hidden>
+            <div class="mb-2 flex items-center gap-2">
+              <span class="chip-dot" id="palette-chip"></span>
+              <span id="palette-label" class="hint mono">Color 214</span>
+            </div>
+            <div id="palette" class="palette" role="radiogroup" aria-label="256-color palette"></div>
+            <p class="hint mt-2">Arrow keys move around the grid.</p>
+          </div>
+        </div>
+
+        <div class="group space-y-5">
+          <div>
+            <span class="label block mb-2" id="bg-label">Background</span>
+            <div id="background" class="bg-options" role="group" aria-labelledby="bg-label">
+              <button type="button" data-value="midnight" aria-pressed="true"><span class="chip" style="background:#0b0d12"></span>Midnight</button>
+              <button type="button" data-value="black" aria-pressed="false"><span class="chip" style="background:#000"></span>Black</button>
+              <button type="button" data-value="white" aria-pressed="false"><span class="chip" style="background:#fff"></span>White</button>
+              <button type="button" data-value="transparent" aria-pressed="false"><span class="chip checker-chip"></span>None</button>
+            </div>
+            <p class="hint mt-2">“None” gives a transparent PNG.</p>
+          </div>
+
+          <label class="flex cursor-pointer items-center justify-between gap-4">
+            <span><span class="label block">Reverse characters</span><span class="hint block">Dense glyphs on dark areas; for light backgrounds</span></span>
+            <input id="invert" type="checkbox" class="switch-input sr-only"><span class="switch-track"></span>
+          </label>
+
+          <label class="flex cursor-pointer items-center justify-between gap-4">
+            <span><span class="label block">Auto contrast</span><span class="hint block">Uses the full character range</span></span>
+            <input id="contrast" type="checkbox" class="switch-input sr-only" checked><span class="switch-track"></span>
+          </label>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
